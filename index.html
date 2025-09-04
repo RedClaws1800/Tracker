@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Live Tracker</title>
+  <title>Live Trail Tracker (Free Map)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
@@ -26,6 +26,7 @@
 <body>
   <div id="map"></div>
   <div class="panel" id="panel">
+    <button id="startBtn">Start Tracking</button>
     <label>Trail Color <input type="color" id="trailColor" value="#2b6fff"></label>
     <label>Trail Width <input type="range" id="trailWidth" min="2" max="12" value="6"></label>
     <label>Marker Color <input type="color" id="iconColor" value="#59d089"></label>
@@ -99,11 +100,19 @@
 
     function onErr(err) {
       console.error(err);
+      alert('Error getting location: ' + err.message);
     }
 
-    if ('geolocation' in navigator) {
-      navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
-    }
+    let watchId = null;
+    document.getElementById('startBtn').addEventListener('click', () => {
+      if ('geolocation' in navigator) {
+        watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('startBtn').textContent = 'Tracking...';
+      } else {
+        alert('Geolocation not supported on this device.');
+      }
+    });
 
     // Background tracking hint
     document.addEventListener('visibilitychange', () => {
