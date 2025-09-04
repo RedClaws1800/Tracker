@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Live Tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    #map { height: 100%; width: 100%; }
+    .panel {
+      position: fixed; left: 10px; right: 10px; bottom: 10px;
+      background: rgba(0,0,0,0.75);
+      color: white; padding: 12px; border-radius: 12px; font-size: 14px;
+      z-index: 1000; max-width: 100%;
+    }
+    .panel label { display: block; margin-bottom: 6px; }
+    .panel input[type="color"], .panel input[type="range"], .panel input[type="checkbox"] {
+      margin-top: 4px; width: 100%;
+    }
+    .panel button { margin-top: 8px; width: 100%; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; }
+    .panel button:active { transform: scale(0.98); }
+    #stats { margin-top: 10px; font-size: 13px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="panel" id="panel">
+    <label>Trail Color <input type="color" id="trailColor" value="#2b6fff"></label>
+    <label>Trail Width <input type="range" id="trailWidth" min="2" max="12" value="6"></label>
+    <label>Marker Color <input type="color" id="iconColor" value="#59d089"></label>
+    <label><input type="checkbox" id="autoCenter" checked> Auto Center</label>
+    <button id="clearBtn">Clear Trail</button>
+    <div id="stats">Distance: 0.00 km</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([0, 0], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let trailColor = document.getElementById('trailColor').value;
+    let trailWidth = +document.getElementById('trailWidth').value;
+    let iconColor = document.getElementById('iconColor').value;
+
+    let coords = [];
+    let polyline = L.polyline([], { color: trailColor, weight: trailWidth }).addTo(map);
+    let marker = L.circleMarker([0, 0], { radius: 8, color: iconColor, fillColor: iconColor, fillOpacity: 1 }).addTo(map);
+
+    function updateAppearance() {
+      trailColor = document.getElementById('trailColor').value;
+      trailWidth = +document.getElementById('trailWidth').value;
+      iconColor = document.getElementById('iconColor').value;
+      polyline.setStyle({ color: trailColor, weight: trailWidth });
+      marker.setStyle({ color: iconColor, fillColor: iconColor });
+    }
+
+    document.getElementById('trailColor').addEventListener('input', updateAppearance);
+    document.getElementById('trailWidth').addEventListener('input', updateAppearance);
+    document.getElementById('iconColor').addEventListener('input', updateAppearance);
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      coords = [];
+      polyline.setLatLngs([]);
+      totalDistance = 0;
+      updateStats(totalDistance);
+    });
+
+    function updateStats(distance) {
+      document.getElementById('stats').textContent = `Distance: ${(distance/1000).toFixed(2)} km`;
+    }
+
+    let totalDistance = 0;
+    function haversine(a, b) {
+      const R = 6371e3;
+      const φ1 = a.lat*Math.PI/180, φ2 = b.lat*Math.PI/180;
+      const Δφ = (b.lat-a.lat)*Math.PI/180;
+      const Δλ = (b.lng-a.lng)*Math.PI/180;
+      const s = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+      return 2*R*Math.asin(Math.sqrt(s));
+    }
+
+    function onPos(pos) {
+      const { latitude, longitude } = pos.coords;
+      const pt = { lat: latitude, lng: longitude };
+      marker.setLatLng(pt);
+      if (document.getElementById('autoCenter').checked) map.setView(pt, map.getZoom());
+
+      if (coords.length) {
+        totalDistance += haversine(coords[coords.length-1], pt);
+        updateStats(totalDistance);
+      }
+      coords.push(pt);
+      polyline.addLatLng(pt);
+    }
+
+    function onErr(err) {
+      console.error(err);
+    }
+
+    if ('geolocation' in navigator) {
+      navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
+    }
+
+    // Background tracking hint
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        console.log("Tracking continues in background if browser allows.");
+      }
+    });
+  </script>
+</body>
+</html>
