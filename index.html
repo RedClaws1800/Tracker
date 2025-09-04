@@ -98,17 +98,30 @@
       polyline.addLatLng(pt);
     }
 
+    let watchId = null;
     function onErr(err) {
       console.error(err);
-      alert('Error getting location: ' + err.message);
+      if (err.code === 0) { // kCLErrorDomain error 0 on iOS
+        console.log("Retrying geolocation after error 0...");
+        setTimeout(() => {
+          if ('geolocation' in navigator) {
+            watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
+          }
+        }, 2000);
+      } else {
+        alert('Error getting location: ' + err.message);
+      }
     }
 
-    let watchId = null;
     document.getElementById('startBtn').addEventListener('click', () => {
       if ('geolocation' in navigator) {
-        watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
-        document.getElementById('startBtn').disabled = true;
-        document.getElementById('startBtn').textContent = 'Tracking...';
+        try {
+          watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
+          document.getElementById('startBtn').disabled = true;
+          document.getElementById('startBtn').textContent = 'Tracking...';
+        } catch (e) {
+          alert('Geolocation request failed: ' + e.message);
+        }
       } else {
         alert('Geolocation not supported on this device.');
       }
