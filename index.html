@@ -13,6 +13,12 @@
       background: rgba(0,0,0,0.75);
       color: white; padding: 12px; border-radius: 12px; font-size: 14px;
       z-index: 1000; max-width: 100%;
+      transition: max-height 0.3s ease, padding 0.3s ease;
+      overflow: hidden;
+    }
+    .panel.collapsed {
+      max-height: 40px;
+      padding: 8px 12px;
     }
     .panel label { display: block; margin-bottom: 6px; }
     .panel input[type="color"], .panel input[type="range"], .panel input[type="checkbox"] {
@@ -21,18 +27,22 @@
     .panel button { margin-top: 8px; width: 100%; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; }
     .panel button:active { transform: scale(0.98); }
     #stats { margin-top: 10px; font-size: 13px; text-align: center; }
+    #toggleMenu { position: absolute; top: 8px; right: 12px; background: #444; color: white; border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div class="panel" id="panel">
-    <button id="startBtn">Start Tracking</button>
-    <label>Trail Color <input type="color" id="trailColor" value="#2b6fff"></label>
-    <label>Trail Width <input type="range" id="trailWidth" min="2" max="12" value="6"></label>
-    <label>Marker Color <input type="color" id="iconColor" value="#59d089"></label>
-    <label><input type="checkbox" id="autoCenter" checked> Auto Center</label>
-    <button id="clearBtn">Clear Trail</button>
-    <div id="stats">Distance: 0.00 km</div>
+    <button id="toggleMenu">▼</button>
+    <div id="menuContent">
+      <button id="startBtn">Start Tracking</button>
+      <label>Trail Color <input type="color" id="trailColor" value="#2b6fff"></label>
+      <label>Trail Width <input type="range" id="trailWidth" min="2" max="12" value="6"></label>
+      <label>Marker Color <input type="color" id="iconColor" value="#59d089"></label>
+      <label><input type="checkbox" id="autoCenter" checked> Auto Center</label>
+      <button id="clearBtn">Clear Trail</button>
+      <div id="stats">Distance: 0.00 km</div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -125,6 +135,14 @@
       } else {
         alert('Geolocation not supported on this device.');
       }
+    });
+
+    // Collapse/expand menu
+    const panel = document.getElementById('panel');
+    const toggleMenu = document.getElementById('toggleMenu');
+    toggleMenu.addEventListener('click', () => {
+      panel.classList.toggle('collapsed');
+      toggleMenu.textContent = panel.classList.contains('collapsed') ? '▲' : '▼';
     });
 
     // Background tracking hint
