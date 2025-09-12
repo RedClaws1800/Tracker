@@ -2,180 +2,390 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Elevation Tracker</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Elevation + Points Tracker (with iOS retry)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
-    #map { height: 100%; width: 100%; }
+    html,body { height:100%; margin:0; font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    #map { height:100%; width:100%; }
     .panel {
-      position: fixed; left: 10px; right: 10px; bottom: 10px;
-      background: rgba(0,0,0,0.75);
-      color: white; padding: 12px; border-radius: 12px; font-size: 14px;
-      z-index: 1000; max-width: 100%;
-      transition: max-height 0.3s ease, padding 0.3s ease;
-      overflow: hidden;
+      position:fixed; left:10px; right:10px; bottom:10px;
+      background:rgba(0,0,0,0.78); color:#fff; padding:12px; border-radius:12px; font-size:14px;
+      z-index:1000; max-width:100%;
     }
-    .panel.collapsed {
-      max-height: 40px;
-      padding: 8px 12px;
-    }
-    .panel label { display: block; margin-bottom: 6px; }
-    .panel input[type="color"], .panel input[type="range"], .panel input[type="checkbox"] {
-      margin-top: 4px; width: 100%;
-    }
-    .panel button { margin-top: 8px; width: 100%; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; }
-    .panel button:active { transform: scale(0.98); }
-    #stats { margin-top: 10px; font-size: 13px; text-align: center; }
-    #toggleMenu { position: absolute; top: 8px; right: 12px; background: #444; color: white; border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .panel button, .panel input, .panel label { width:100%; }
+    .small { font-size:12px; opacity:0.9; }
+    #status { margin-top:8px; font-size:13px; text-align:center; }
+    #toggleMenu { position:absolute; top:8px; right:12px; background:#444; color:white; border:none; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:12px; }
   </style>
 </head>
 <body>
   <div id="map"></div>
+
   <div class="panel" id="panel">
     <button id="toggleMenu">▼</button>
     <div id="menuContent">
-      <button id="startBtn">Start Tracking</button>
+      <div class="row">
+        <button id="startBtn">Start Tracking</button>
+        <button id="stopBtn" disabled>Stop</button>
+      </div>
+
       <label>Trail Color <input type="color" id="trailColor" value="#2b6fff"></label>
       <label>Trail Width <input type="range" id="trailWidth" min="2" max="12" value="6"></label>
       <label>Marker Color <input type="color" id="iconColor" value="#59d089"></label>
       <label><input type="checkbox" id="autoCenter" checked> Auto Center</label>
       <button id="clearBtn">Clear Trail</button>
-      <div id="stats">
+
+      <div id="stats" class="small" style="margin-top:8px;">
         Distance: 0.00 km<br>
         Elevation Gain: 0 ft<br>
         Points: 0
       </div>
+
+      <div id="status" class="small" style="margin-top:6px; color:#ffd;">Status: Idle</div>
+      <div id="advice" class="small" style="margin-top:6px; color:#f88;"></div>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const map = L.map('map').setView([0, 0], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+  // -------------------------
+  // Map + UI setup
+  // -------------------------
+  const map = L.map('map').setView([0, 0], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
 
-    let trailColor = document.getElementById('trailColor').value;
-    let trailWidth = +document.getElementById('trailWidth').value;
-    let iconColor = document.getElementById('iconColor').value;
+  const trailColorInput = document.getElementById('trailColor');
+  const trailWidthInput = document.getElementById('trailWidth');
+  const iconColorInput  = document.getElementById('iconColor');
+  const autoCenterChk   = document.getElementById('autoCenter');
 
-    let coords = [];
-    let polyline = L.polyline([], { color: trailColor, weight: trailWidth }).addTo(map);
-    let marker = L.circleMarker([0, 0], { radius: 8, color: iconColor, fillColor: iconColor, fillOpacity: 1 }).addTo(map);
+  let polyline = L.polyline([], { color: trailColorInput.value, weight: +trailWidthInput.value }).addTo(map);
+  let marker = L.circleMarker([0,0], { radius:8, color: iconColorInput.value, fillColor: iconColorInput.value, fillOpacity:1 }).addTo(map);
 
-    let totalDistance = 0;
-    let totalElevationGain = 0;
-    let points = 0;
-    let lastElevation = null;
-    let watchId = null;
-    let retryTimer = null;
+  function applyAppearance() {
+    polyline.setStyle({ color: trailColorInput.value, weight: +trailWidthInput.value });
+    marker.setStyle({ color: iconColorInput.value, fillColor: iconColorInput.value });
+  }
+  trailColorInput.addEventListener('input', applyAppearance);
+  trailWidthInput.addEventListener('input', applyAppearance);
+  iconColorInput.addEventListener('input', applyAppearance);
 
-    function updateAppearance() {
-      trailColor = document.getElementById('trailColor').value;
-      trailWidth = +document.getElementById('trailWidth').value;
-      iconColor = document.getElementById('iconColor').value;
-      polyline.setStyle({ color: trailColor, weight: trailWidth });
-      marker.setStyle({ color: iconColor, fillColor: iconColor });
-    }
+  // -------------------------
+  // State variables
+  // -------------------------
+  let coords = [];
+  let totalDistance = 0;         // meters
+  let totalElevationGain = 0;    // feet
+  let points = 0;
+  let lastElevation = null;      // feet
+  let watchId = null;
+  let probeAttempts = 0;
+  let maxProbeAttempts = 6;
+  let probeTimer = null;
 
-    document.getElementById('trailColor').addEventListener('input', updateAppearance);
-    document.getElementById('trailWidth').addEventListener('input', updateAppearance);
-    document.getElementById('iconColor').addEventListener('input', updateAppearance);
+  // UI elements
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn  = document.getElementById('stopBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const statsEl  = document.getElementById('stats');
+  const statusEl = document.getElementById('status');
+  const adviceEl  = document.getElementById('advice');
+  const panel = document.getElementById('panel');
+  const toggleMenu = document.getElementById('toggleMenu');
 
-    document.getElementById('clearBtn').addEventListener('click', () => {
-      coords = [];
-      polyline.setLatLngs([]);
-      totalDistance = 0;
-      totalElevationGain = 0;
-      points = 0;
-      lastElevation = null;
-      updateStats();
-    });
+  toggleMenu.addEventListener('click', () => {
+    panel.classList.toggle('collapsed');
+    toggleMenu.textContent = panel.classList.contains('collapsed') ? '▲' : '▼';
+  });
 
-    function updateStats(message = null) {
-      document.getElementById('stats').innerHTML =
-        (message ? `<em>${message}</em><br>` : "") +
-        `Distance: ${(totalDistance / 1000).toFixed(2)} km<br>` +
-        `Elevation Gain: ${totalElevationGain.toFixed(0)} ft<br>` +
-        `Points: ${points}`;
-    }
+  function setStatus(txt, color = '#ffd') {
+    statusEl.style.color = color;
+    statusEl.textContent = 'Status: ' + txt;
+  }
+  function setAdvice(txt) {
+    adviceEl.textContent = txt || '';
+  }
 
-    function haversine(a, b) {
-      const R = 6371e3;
-      const φ1 = a.lat * Math.PI / 180, φ2 = b.lat * Math.PI / 180;
-      const Δφ = (b.lat - a.lat) * Math.PI / 180;
-      const Δλ = (b.lng - a.lng) * Math.PI / 180;
-      const s = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-      return 2 * R * Math.asin(Math.sqrt(s));
-    }
+  function updateStatsUI(message = '') {
+    statsEl.innerHTML = (message ? `<em>${message}</em><br>` : '') +
+      `Distance: ${(totalDistance/1000).toFixed(2)} km<br>` +
+      `Elevation Gain: ${Math.round(totalElevationGain)} ft<br>` +
+      `Points: ${Math.round(points)}`;
+  }
 
-    function onPos(pos) {
-      const { latitude, longitude, altitude } = pos.coords;
-      const pt = { lat: latitude, lng: longitude };
-      marker.setLatLng(pt);
-      if (document.getElementById('autoCenter').checked) map.setView(pt, map.getZoom());
+  // -------------------------
+  // Utilities
+  // -------------------------
+  function haversine(a, b) {
+    const R = 6371e3;
+    const φ1 = a.lat * Math.PI/180, φ2 = b.lat * Math.PI/180;
+    const Δφ = (b.lat - a.lat) * Math.PI/180;
+    const Δλ = (b.lng - a.lng) * Math.PI/180;
+    const s = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+    return 2*R*Math.asin(Math.sqrt(s));
+  }
 
-      if (coords.length) {
-        totalDistance += haversine(coords[coords.length - 1], pt);
+  function isSecureContextForGeo() {
+    // Modern Safari requires HTTPS (or localhost). file:// often will fail.
+    const host = location.hostname;
+    return location.protocol === 'https:' || host === 'localhost' || host === '127.0.0.1';
+  }
+
+  function isIosSafari() {
+    const ua = navigator.userAgent || '';
+    return (/iP(hone|ad|od)/.test(ua) && /Safari/.test(ua) && !/CriOS|FxiOS|OPiOS|EdgiOS/.test(ua));
+  }
+
+  // Promise wrapper for getCurrentPosition
+  function getPositionOnce(options = {}) {
+    return new Promise((resolve, reject) => {
+      if (!('geolocation' in navigator)) {
+        reject({ code: 99, message: 'Geolocation not available in this browser.' });
+        return;
       }
+      navigator.geolocation.getCurrentPosition(resolve, reject, options);
+    });
+  }
 
-      // Track elevation gain
-      if (altitude !== null) {
-        const feet = altitude * 3.28084;
-        if (lastElevation !== null && feet > lastElevation) {
-          const gain = feet - lastElevation;
-          totalElevationGain += gain;
-          points += Math.floor(gain);
+  // -------------------------
+  // Main tracking logic
+  // -------------------------
+  async function probeAndStart() {
+    // Called when user clicks Start. Sequence:
+    // 1) If insecure context, warn strongly and still try
+    // 2) Use several probes (getCurrentPosition) starting with enableHighAccuracy:false
+    // 3) If a probe succeeds, start a watchPosition (high accuracy)
+    if (!('geolocation' in navigator)) {
+      setStatus('Geolocation not supported', '#f55');
+      setAdvice('This browser does not support geolocation.');
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      return;
+    }
+
+    if (!isSecureContextForGeo()) {
+      // Warn user about serving method: file:// / http will often be blocked by Safari
+      setStatus('Insecure context — geolocation may be blocked', '#f88');
+      setAdvice('Open this page from a secure origin (https://) or localhost. If you opened the file directly (file:///), Safari often blocks location.');
+      // continue attempting anyway
+    } else {
+      setAdvice('');
+    }
+
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    setStatus('Checking permission / requesting location...');
+    probeAttempts = 0;
+
+    // Attempt sequence: start with low accuracy (less likely to error on iOS), escalate to high accuracy
+    const attempts = [
+      { enableHighAccuracy: false, timeout: 10000 }, // quick, low-acc probe to get permission prompt
+      { enableHighAccuracy: false, timeout: 15000 },
+      { enableHighAccuracy: true,  timeout: 20000 }, // try high-acc after a couple attempts
+      { enableHighAccuracy: true,  timeout: 30000 }
+    ];
+
+    let lastError = null;
+    for (let i = 0; i < maxProbeAttempts; i++) {
+      const attempt = attempts[Math.min(i, attempts.length - 1)];
+      probeAttempts++;
+      setStatus(`Probing location (attempt ${probeAttempts})...`);
+      try {
+        const pos = await getPositionOnce({ enableHighAccuracy: attempt.enableHighAccuracy, maximumAge:0, timeout: attempt.timeout });
+        // got a position — initialize map and start watching
+        onPos(pos);
+        startWatch({ enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+        setStatus('Tracking (watch started).');
+        setAdvice('');
+        return;
+      } catch (err) {
+        lastError = err;
+        console.warn('Probe error', probeAttempts, err);
+        // err.code mapping:
+        // 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT, 0 = unknown iOS kCLErrorDomain error 0
+        if (err && err.code === 1) {
+          // permission denied — stop and instruct user how to fix
+          setStatus('Permission denied', '#f55');
+          showPermissionInstructions();
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+          return;
+        } else if (err && err.code === 2) {
+          // position unavailable — try again after a pause
+          setStatus('Position unavailable — retrying...', '#f88');
+          await delay(1500);
+          continue;
+        } else if (err && (err.code === 3 || err.code === 0 || !err.code)) {
+          // timeout or iOS unknown (0) — back off and retry
+          setStatus('Waiting for GPS signal — retrying...', '#ffb');
+          await delay(1500 + i*1000);
+          continue;
+        } else {
+          // unknown error — show info and stop
+          setStatus('Error: ' + (err && err.message ? err.message : 'Unknown'), '#f55');
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+          return;
         }
-        lastElevation = feet;
       }
-
-      updateStats();
-      coords.push(pt);
-      polyline.addLatLng(pt);
     }
 
-    function onErr(err) {
-      console.error("Geolocation error:", err);
-      if (err.code === 0) { // iOS kCLErrorDomain error 0
-        updateStats("Waiting for GPS... retrying");
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(startTracking, 2000);
+    // if we get here, probes exhausted
+    setStatus('Unable to obtain location (probes exhausted).', '#f55');
+    if (lastError && lastError.code === 0) {
+      setAdvice('iOS returned a low-level error (kCLErrorDomain 0). Try: reload, ensure Location Services enabled, ensure site allowed in Settings → Privacy → Location Services, or open page over HTTPS/localhost.');
+    } else {
+      setAdvice('Try reloading the page, enabling location in Settings, or serving the page over HTTPS/localhost.');
+    }
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  function startWatch(options = { enableHighAccuracy:true, maximumAge:5000, timeout:20000 }) {
+    try {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+      watchId = navigator.geolocation.watchPosition(onPos, onWatchError, options);
+      console.log('watchId', watchId);
+    } catch (e) {
+      console.error('watchPosition failed to start', e);
+      setStatus('watchPosition failed: ' + e.message, '#f55');
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  }
+
+  function stopTracking() {
+    if (watchId) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    clearTimeout(probeTimer);
+    setStatus('Stopped', '#ddd');
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  function onWatchError(err) {
+    console.warn('watch error', err);
+    if (!err) return;
+    if (err.code === 1) {
+      setStatus('Permission denied while watching', '#f55');
+      showPermissionInstructions();
+      stopTracking();
+    } else if (err.code === 0) {
+      // iOS unknown error 0 — attempt to probe again with backoff, but avoid infinite loops
+      setStatus('iOS error (kCLErrorDomain 0) — re-probing...', '#ffb');
+      // clear existing watch and re-run probe sequence after small delay
+      try { if (watchId) navigator.geolocation.clearWatch(watchId); } catch(e) {}
+      watchId = null;
+      if (probeAttempts < maxProbeAttempts) {
+        probeTimer = setTimeout(probeAndStart, 1500);
       } else {
-        updateStats("Error: " + err.message);
+        setStatus('Repeated errors; check settings (Location Services / HTTPS).', '#f55');
+        setAdvice('Open Settings → Privacy & Security → Location Services and ensure Safari (or this site) is allowed. Also ensure "Precise Location" is on for best results.');
+        stopTracking();
       }
+    } else if (err.code === 3) {
+      // timeout
+      setStatus('GPS timeout — still trying...', '#ffb');
+    } else {
+      setStatus('Geolocation error: ' + (err.message || err.code), '#f55');
+    }
+  }
+
+  function showPermissionInstructions() {
+    // Give clear instructions for iOS Safari
+    if (isIosSafari()) {
+      setAdvice('Permission denied. To enable: Settings → Privacy & Security → Location Services → Safari Websites (or the site name). Set to "While Using" and enable "Precise Location". Then come back and press Start.');
+    } else {
+      setAdvice('Permission denied. Please allow Location access for this site in your browser settings.');
+    }
+  }
+
+  // -------------------------
+  // Position update handler
+  // -------------------------
+  function onPos(position) {
+    if (!position || !position.coords) return;
+    const { latitude, longitude, altitude } = position.coords;
+    const pt = { lat: latitude, lng: longitude };
+
+    // move marker + center optionally
+    marker.setLatLng(pt);
+    if (autoCenterChk.checked) map.setView(pt, map.getZoom());
+
+    // distance
+    if (coords.length) {
+      const last = coords[coords.length-1];
+      const d = haversine(last, pt);
+      if (!Number.isNaN(d) && isFinite(d)) totalDistance += d;
+    }
+    coords.push(pt);
+    polyline.addLatLng(pt);
+
+    // elevation: use device altitude if available (meters -> feet)
+    if (typeof altitude === 'number' && altitude !== null) {
+      const feet = altitude * 3.28084;
+      if (lastElevation !== null && feet > lastElevation + 0.5) {
+        const gain = feet - lastElevation;
+        totalElevationGain += gain;
+        points += Math.floor(gain); // 1 point per foot
+      }
+      lastElevation = feet;
+    } else {
+      // altitude not provided by device
+      // keep lastElevation as-is; we do not call external APIs here
     }
 
-    function startTracking() {
-      if ('geolocation' in navigator) {
-        try {
-          if (watchId) navigator.geolocation.clearWatch(watchId);
-          watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
-          document.getElementById('startBtn').disabled = true;
-          document.getElementById('startBtn').textContent = 'Tracking...';
-          updateStats("Waiting for GPS...");
-        } catch (e) {
-          updateStats("Geolocation failed: " + e.message);
-        }
-      } else {
-        updateStats("Geolocation not supported on this device.");
-      }
+    updateStatsUI();
+  }
+
+  // -------------------------
+  // Helpers
+  // -------------------------
+  function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  clearBtn.addEventListener('click', () => {
+    coords = [];
+    polyline.setLatLngs([]);
+    totalDistance = 0;
+    totalElevationGain = 0;
+    points = 0;
+    lastElevation = null;
+    updateStatsUI();
+    setStatus('Cleared');
+    setAdvice('');
+  });
+
+  startBtn.addEventListener('click', () => {
+    // require user gesture — ensures iOS shows the permission prompt
+    probeAndStart();
+  });
+
+  stopBtn.addEventListener('click', () => {
+    stopTracking();
+  });
+
+  // initial UI
+  updateStatsUI();
+  setStatus('Idle');
+
+  // If user navigates away / comes back, we leave watch running if browser allows
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      console.log('document hidden — watch may continue depending on browser rules');
     }
+  });
 
-    document.getElementById('startBtn').addEventListener('click', startTracking);
+  // show immediate notice if insecure context likely to fail
+  if (!isSecureContextForGeo()) {
+    setAdvice('Tip: For reliable geolocation on iPhone/Safari, serve this page over HTTPS or via localhost. Opening a saved file (file://) often prevents location access.');
+  }
 
-    const panel = document.getElementById('panel');
-    const toggleMenu = document.getElementById('toggleMenu');
-    toggleMenu.addEventListener('click', () => {
-      panel.classList.toggle('collapsed');
-      toggleMenu.textContent = panel.classList.contains('collapsed') ? '▲' : '▼';
-    });
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) console.log("Tracking continues in background if browser allows.");
-    });
   </script>
 </body>
 </html>
