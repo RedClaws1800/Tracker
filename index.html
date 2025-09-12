@@ -69,6 +69,8 @@
     let totalElevationGain = 0;
     let points = 0;
     let lastElevation = null;
+    let watchId = null;
+    let retryTimer = null;
 
     function updateAppearance() {
       trailColor = document.getElementById('trailColor').value;
@@ -92,8 +94,9 @@
       updateStats();
     });
 
-    function updateStats() {
+    function updateStats(message = null) {
       document.getElementById('stats').innerHTML =
+        (message ? `<em>${message}</em><br>` : "") +
         `Distance: ${(totalDistance / 1000).toFixed(2)} km<br>` +
         `Elevation Gain: ${totalElevationGain.toFixed(0)} ft<br>` +
         `Points: ${points}`;
@@ -120,11 +123,11 @@
 
       // Track elevation gain
       if (altitude !== null) {
-        const feet = altitude * 3.28084; // convert meters -> feet
+        const feet = altitude * 3.28084;
         if (lastElevation !== null && feet > lastElevation) {
           const gain = feet - lastElevation;
           totalElevationGain += gain;
-          points += Math.floor(gain); // 1 point per foot climbed
+          points += Math.floor(gain);
         }
         lastElevation = feet;
       }
@@ -134,25 +137,34 @@
       polyline.addLatLng(pt);
     }
 
-    let watchId = null;
     function onErr(err) {
-      console.error(err);
-      alert('Error getting location: ' + err.message);
+      console.error("Geolocation error:", err);
+      if (err.code === 0) { // iOS kCLErrorDomain error 0
+        updateStats("Waiting for GPS... retrying");
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(startTracking, 2000);
+      } else {
+        updateStats("Error: " + err.message);
+      }
     }
 
-    document.getElementById('startBtn').addEventListener('click', () => {
+    function startTracking() {
       if ('geolocation' in navigator) {
         try {
+          if (watchId) navigator.geolocation.clearWatch(watchId);
           watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
           document.getElementById('startBtn').disabled = true;
           document.getElementById('startBtn').textContent = 'Tracking...';
+          updateStats("Waiting for GPS...");
         } catch (e) {
-          alert('Geolocation request failed: ' + e.message);
+          updateStats("Geolocation failed: " + e.message);
         }
       } else {
-        alert('Geolocation not supported on this device.');
+        updateStats("Geolocation not supported on this device.");
       }
-    });
+    }
+
+    document.getElementById('startBtn').addEventListener('click', startTracking);
 
     const panel = document.getElementById('panel');
     const toggleMenu = document.getElementById('toggleMenu');
@@ -162,9 +174,7 @@
     });
 
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        console.log("Tracking continues in background if browser allows.");
-      }
+      if (document.hidden) console.log("Tracking continues in background if browser allows.");
     });
   </script>
 </body>
