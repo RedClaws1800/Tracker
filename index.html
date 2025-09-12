@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Live Trail Tracker (Free Map)</title>
+  <title>Elevation Tracker</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
@@ -41,7 +41,11 @@
       <label>Marker Color <input type="color" id="iconColor" value="#59d089"></label>
       <label><input type="checkbox" id="autoCenter" checked> Auto Center</label>
       <button id="clearBtn">Clear Trail</button>
-      <div id="stats">Distance: 0.00 km</div>
+      <div id="stats">
+        Distance: 0.00 km<br>
+        Elevation Gain: 0 ft<br>
+        Points: 0
+      </div>
     </div>
   </div>
 
@@ -61,6 +65,11 @@
     let polyline = L.polyline([], { color: trailColor, weight: trailWidth }).addTo(map);
     let marker = L.circleMarker([0, 0], { radius: 8, color: iconColor, fillColor: iconColor, fillOpacity: 1 }).addTo(map);
 
+    let totalDistance = 0;
+    let totalElevationGain = 0;
+    let points = 0;
+    let lastElevation = null;
+
     function updateAppearance() {
       trailColor = document.getElementById('trailColor').value;
       trailWidth = +document.getElementById('trailWidth').value;
@@ -77,33 +86,50 @@
       coords = [];
       polyline.setLatLngs([]);
       totalDistance = 0;
-      updateStats(totalDistance);
+      totalElevationGain = 0;
+      points = 0;
+      lastElevation = null;
+      updateStats();
     });
 
-    function updateStats(distance) {
-      document.getElementById('stats').textContent = `Distance: ${(distance/1000).toFixed(2)} km`;
+    function updateStats() {
+      document.getElementById('stats').innerHTML =
+        `Distance: ${(totalDistance / 1000).toFixed(2)} km<br>` +
+        `Elevation Gain: ${totalElevationGain.toFixed(0)} ft<br>` +
+        `Points: ${points}`;
     }
 
-    let totalDistance = 0;
     function haversine(a, b) {
       const R = 6371e3;
-      const φ1 = a.lat*Math.PI/180, φ2 = b.lat*Math.PI/180;
-      const Δφ = (b.lat-a.lat)*Math.PI/180;
-      const Δλ = (b.lng-a.lng)*Math.PI/180;
-      const s = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
-      return 2*R*Math.asin(Math.sqrt(s));
+      const φ1 = a.lat * Math.PI / 180, φ2 = b.lat * Math.PI / 180;
+      const Δφ = (b.lat - a.lat) * Math.PI / 180;
+      const Δλ = (b.lng - a.lng) * Math.PI / 180;
+      const s = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
     }
 
     function onPos(pos) {
-      const { latitude, longitude } = pos.coords;
+      const { latitude, longitude, altitude } = pos.coords;
       const pt = { lat: latitude, lng: longitude };
       marker.setLatLng(pt);
       if (document.getElementById('autoCenter').checked) map.setView(pt, map.getZoom());
 
       if (coords.length) {
-        totalDistance += haversine(coords[coords.length-1], pt);
-        updateStats(totalDistance);
+        totalDistance += haversine(coords[coords.length - 1], pt);
       }
+
+      // Track elevation gain
+      if (altitude !== null) {
+        const feet = altitude * 3.28084; // convert meters -> feet
+        if (lastElevation !== null && feet > lastElevation) {
+          const gain = feet - lastElevation;
+          totalElevationGain += gain;
+          points += Math.floor(gain); // 1 point per foot climbed
+        }
+        lastElevation = feet;
+      }
+
+      updateStats();
       coords.push(pt);
       polyline.addLatLng(pt);
     }
@@ -111,16 +137,7 @@
     let watchId = null;
     function onErr(err) {
       console.error(err);
-      if (err.code === 0) { // kCLErrorDomain error 0 on iOS
-        console.log("Retrying geolocation after error 0...");
-        setTimeout(() => {
-          if ('geolocation' in navigator) {
-            watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true });
-          }
-        }, 2000);
-      } else {
-        alert('Error getting location: ' + err.message);
-      }
+      alert('Error getting location: ' + err.message);
     }
 
     document.getElementById('startBtn').addEventListener('click', () => {
@@ -137,7 +154,6 @@
       }
     });
 
-    // Collapse/expand menu
     const panel = document.getElementById('panel');
     const toggleMenu = document.getElementById('toggleMenu');
     toggleMenu.addEventListener('click', () => {
@@ -145,7 +161,6 @@
       toggleMenu.textContent = panel.classList.contains('collapsed') ? '▲' : '▼';
     });
 
-    // Background tracking hint
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         console.log("Tracking continues in background if browser allows.");
